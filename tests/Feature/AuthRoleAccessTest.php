@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Actividad;
+use App\Models\Meta;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -98,4 +99,67 @@ it('el dashboard del vendedor solo muestra sus propias actividades', function ()
     $response->assertOk();
     $response->assertSee($vendedor->name);
     $response->assertDontSee($otroVendedor->name);
+});
+
+it('muestra analitica avanzada en reportes del auditor', function () {
+    $auditor = crearUsuario('auditor', ['email' => 'auditor-reportes@example.com']);
+    $vendedor = crearUsuario('vendedor', ['email' => 'vendedor-reportes@example.com']);
+
+    Actividad::create([
+        'id_usuario' => $vendedor->id,
+        'fecha' => '2026-01-15',
+        'ventas' => 1000,
+        'clientes_atendidos' => 10,
+        'clientes_visitados' => 8,
+        'nuevos_clientes' => 2,
+    ]);
+
+    Actividad::create([
+        'id_usuario' => $vendedor->id,
+        'fecha' => '2026-02-15',
+        'ventas' => 3000,
+        'clientes_atendidos' => 20,
+        'clientes_visitados' => 16,
+        'nuevos_clientes' => 4,
+    ]);
+
+    Actividad::create([
+        'id_usuario' => $vendedor->id,
+        'fecha' => '2026-03-15',
+        'ventas' => 2500,
+        'clientes_atendidos' => 15,
+        'clientes_visitados' => 13,
+        'nuevos_clientes' => 3,
+    ]);
+
+    $this->actingAs($auditor)
+        ->get(route('auditor.reportes.index', ['mes' => 3, 'ano' => 2026]))
+        ->assertOk()
+        ->assertSee('Datos esperados')
+        ->assertSee('Promedio de los meses anteriores con actividad');
+});
+
+it('el administrador accede a reportes y estadisticas avanzadas', function () {
+    $admin = crearUsuario('admin', ['email' => 'admin-analitica@example.com']);
+    $vendedor = crearUsuario('vendedor', ['email' => 'vendedor-analitica@example.com']);
+
+    Meta::create([
+        'id_usuario' => $vendedor->id,
+        'mes' => 5,
+        'año' => 2026,
+        'ventas_meta' => 5000,
+        'clientes_atendidos_meta' => 30,
+        'clientes_visitados_meta' => 25,
+        'nuevos_clientes_meta' => 5,
+    ]);
+
+    $this->actingAs($admin)
+        ->get(route('admin.reportes.index', ['mes' => 5, 'ano' => 2026]))
+        ->assertOk()
+        ->assertSee('Datos esperados');
+
+    $this->actingAs($admin)
+        ->get(route('admin.estadisticas.index', ['mes' => 5, 'ano' => 2026]))
+        ->assertOk()
+        ->assertSee('Estadisticas del sistema');
 });

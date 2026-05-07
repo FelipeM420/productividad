@@ -28,6 +28,7 @@ Route::middleware(['auth', 'solo.admin'])->prefix('admin')->name('admin.')->grou
     // Reportes
     Route::get('/reportes',         [ReporteController::class, 'index'])->name('reportes.index');
     Route::get('/reportes/pdf',     [ReporteController::class, 'pdf'])->name('reportes.pdf');
+    Route::get('/estadisticas',     [ReporteController::class, 'estadisticas'])->name('estadisticas.index');
 });
 
 

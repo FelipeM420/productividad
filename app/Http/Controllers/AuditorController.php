@@ -2,133 +2,121 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
-use App\Models\Meta;
 use App\Models\Actividad;
-use Illuminate\Http\Request;
+use App\Models\Meta;
+use App\Models\User;
+use App\Services\ProductividadAnalytics;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Request;
 
 class AuditorController extends Controller
 {
-    // ── Dashboard ─────────────────────────────────────────
+    public function __construct(private ProductividadAnalytics $analytics)
+    {
+    }
+
     public function dashboard()
     {
-        $mes = (int) date('n');
-        $año = (int) date('Y');
+        $mes = (int) now()->month;
+        $ano = (int) now()->year;
 
-        $totalVendedores = User::where('rol','vendedor')->where('activo',true)->count();
-        $totalActividades = Actividad::whereMonth('fecha',$mes)->whereYear('fecha',$año)->count();
-        $totalMetas = Meta::where('mes',$mes)->where('año',$año)->count();
+        $totalVendedores = User::where('rol', 'vendedor')->where('activo', true)->count();
+        $totalActividades = Actividad::whereMonth('fecha', $mes)->whereYear('fecha', $ano)->count();
+        $totalMetas = Meta::where('mes', $mes)->where('año', $ano)->count();
+        $ventasTotales = Actividad::whereMonth('fecha', $mes)->whereYear('fecha', $ano)->sum('ventas');
+        $resumen = $this->analytics->construirResumen($mes, $ano);
 
-        $ventasTotales = Actividad::whereMonth('fecha',$mes)
-            ->whereYear('fecha',$año)
-            ->sum('ventas');
+        return view('auditor.dashboard', [
+            'totalVendedores' => $totalVendedores,
+            'totalActividades' => $totalActividades,
+            'totalMetas' => $totalMetas,
+            'ventasTotales' => $ventasTotales,
+            'resumen' => $resumen,
+            'mes' => $mes,
+            'año' => $ano,
+        ]);
+    }
 
-        $resumen = $this->construirResumen($mes, $año);
+    public function reportes(Request $request)
+    {
+        [$mes, $ano, $vendedorId] = $this->filtros($request);
 
-        return view('auditor.dashboard', compact(
-            'totalVendedores','totalActividades','totalMetas',
-            'ventasTotales','resumen','mes','año'
+        $vendedores = User::where('rol', 'vendedor')->where('activo', true)->orderBy('name')->get();
+        $reporte = $this->analytics->construirResumen($mes, $ano, $vendedorId);
+        $totales = $this->analytics->totalesReporte($reporte);
+        $proyeccion = $this->analytics->proyeccionMensual($mes, $ano, $vendedorId);
+        $series = $this->analytics->seriesMensuales($ano, $vendedorId);
+        $meses = $this->meses();
+
+        return view('auditor.reportes.index', compact(
+            'reporte',
+            'totales',
+            'proyeccion',
+            'series',
+            'vendedores',
+            'mes',
+            'ano',
+            'vendedorId',
+            'meses'
         ));
     }
 
-    // ── Reportes ──────────────────────────────────────────
-    public function reportes(Request $request)
-    {
-        $mes        = $request->input('mes', date('n'));
-        $año        = $request->input('año', date('Y'));
-        $vendedorId = $request->input('vendedor');
-
-        $vendedores = User::where('rol','vendedor')->where('activo',true)->get();
-        $reporte    = $this->construirResumen($mes, $año, $vendedorId);
-
-        $meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-
-        return view('auditor.reportes.index',
-            compact('reporte','vendedores','mes','año','vendedorId','meses'));
-    }
-
-    // ── Exportar PDF ──────────────────────────────────────
     public function pdf(Request $request)
     {
-        $mes        = $request->input('mes', date('n'));
-        $año        = $request->input('año', date('Y'));
-        $vendedorId = $request->input('vendedor');
+        [$mes, $ano, $vendedorId] = $this->filtros($request);
 
-        $reporte = $this->construirResumen($mes, $año, $vendedorId);
-
+        $reporte = $this->analytics->construirResumen($mes, $ano, $vendedorId);
+        $totales = $this->analytics->totalesReporte($reporte);
+        $proyeccion = $this->analytics->proyeccionMensual($mes, $ano, $vendedorId);
         $meses = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
-                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+            'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-        $pdf = Pdf::loadView('auditor.reportes.pdf', compact('reporte','mes','año','meses'))
-                  ->setPaper('a4','landscape');
+        $pdf = Pdf::loadView('auditor.reportes.pdf', compact(
+            'reporte',
+            'totales',
+            'proyeccion',
+            'mes',
+            'ano',
+            'meses'
+        ))->setPaper('a4', 'landscape');
 
-        return $pdf->download("reporte_{$meses[$mes]}_{$año}.pdf");
+        return $pdf->download("reporte_{$meses[$mes]}_{$ano}.pdf");
     }
 
-    // ── Estadísticas ──────────────────────────────────────
     public function estadisticas(Request $request)
     {
-        $año = $request->input('año', date('Y'));
+        [$mes, $ano, $vendedorId] = $this->filtros($request);
 
-        // Ventas mensuales de todos los vendedores agrupadas por mes
-        $ventasMensuales = Actividad::whereYear('fecha', $año)
-            ->selectRaw('MONTH(fecha) as mes, SUM(ventas) as total')
-            ->groupBy('mes')
-            ->orderBy('mes')
-            ->pluck('total','mes');
+        $vendedores = User::where('rol', 'vendedor')->where('activo', true)->orderBy('name')->get();
+        $series = $this->analytics->seriesMensuales($ano, $vendedorId);
+        $comparacion = $this->analytics->construirResumen($mes, $ano, $vendedorId);
+        $proyeccion = $this->analytics->proyeccionMensual($mes, $ano, $vendedorId);
+        $meses = $this->meses();
 
-        // Preparar array de 12 meses (rellenar vacíos con 0)
-        $ventasPorMes = [];
-        for ($i = 1; $i <= 12; $i++) {
-            $ventasPorMes[] = (float)($ventasMensuales[$i] ?? 0);
-        }
-
-        // Comparación meta vs real por vendedor (mes actual)
-        $mes = (int)date('n');
-        $comparacion = $this->construirResumen($mes, $año);
-
-        $vendedores = User::where('rol','vendedor')->where('activo',true)->get();
-
-        return view('auditor.estadisticas.index',
-            compact('ventasPorMes','comparacion','año','mes','vendedores'));
+        return view('auditor.estadisticas.index', compact(
+            'series',
+            'comparacion',
+            'proyeccion',
+            'ano',
+            'mes',
+            'vendedorId',
+            'vendedores',
+            'meses'
+        ));
     }
 
-    // ── Helper privado ────────────────────────────────────
-    private function construirResumen(int $mes, int $año, ?int $vendedorId = null): \Illuminate\Support\Collection
+    private function filtros(Request $request): array
     {
-        $query = User::where('rol','vendedor')->where('activo',true)
-            ->with([
-                'metas'       => fn($q) => $q->where('mes',$mes)->where('año',$año),
-                'actividades' => fn($q) => $q->whereMonth('fecha',$mes)->whereYear('fecha',$año),
-            ]);
+        $mes = (int) $request->input('mes', now()->month);
+        $ano = (int) $request->input('ano', $request->input('año', $request->input('aÃ±o', now()->year)));
+        $vendedorId = $request->filled('vendedor') ? (int) $request->input('vendedor') : null;
 
-        if ($vendedorId) $query->where('id', $vendedorId);
+        return [$mes, $ano, $vendedorId];
+    }
 
-        return $query->get()->map(function ($v) {
-            $meta = $v->metas->first();
-            $acts = $v->actividades;
-
-            $rv = (float)$acts->sum('ventas');
-            $mv = (float)($meta?->ventas_meta ?? 0);
-            $rca = (int)$acts->sum('clientes_atendidos');
-            $mca = (int)($meta?->clientes_atendidos_meta ?? 0);
-            $rcv = (int)$acts->sum('clientes_visitados');
-            $mcv = (int)($meta?->clientes_visitados_meta ?? 0);
-            $rnc = (int)$acts->sum('nuevos_clientes');
-            $mnc = (int)($meta?->nuevos_clientes_meta ?? 0);
-
-            $pct = fn($r,$m) => $m > 0 ? min(100, round($r/$m*100)) : 0;
-
-            $pv  = $pct($rv, $mv);
-            $pca = $pct($rca, $mca);
-            $pcv = $pct($rcv, $mcv);
-            $pnc = $pct($rnc, $mnc);
-            $global = (int)round(($pv+$pca+$pcv+$pnc)/4);
-
-            return compact('v','rv','mv','rca','mca','rcv','mcv','rnc','mnc',
-                           'pv','pca','pcv','pnc','global');
-        });
+    private function meses(): array
+    {
+        return ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+            'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     }
 }

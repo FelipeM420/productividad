@@ -22,9 +22,33 @@
 <body>
     <h2>Sistema de Medición de Productividad</h2>
     <div class="sub">
-        Reporte de Cumplimiento — {{ $meses[$mes] }} {{ $año }} |
+        Reporte de Cumplimiento - {{ $meses[$mes] }} {{ $ano }} |
         Generado: {{ now()->format('d/m/Y H:i') }}
     </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th colspan="4">Datos esperados del mes</th>
+            </tr>
+            <tr>
+                <th>Metrica</th>
+                <th>Real</th>
+                <th>Esperado</th>
+                <th>% esperado</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach($proyeccion['metricas'] as $key => $m)
+            <tr>
+                <td><strong>{{ $m['label'] }}</strong></td>
+                <td class="text-right">{{ $key === 'ventas' ? '$'.number_format($m['real'],0,',','.') : number_format($m['real'],0,',','.') }}</td>
+                <td class="text-right">{{ $key === 'ventas' ? '$'.number_format($m['esperado'],0,',','.') : number_format($m['esperado'],0,',','.') }}</td>
+                <td class="text-center">{{ $m['cumplimiento_esperado'] }}%</td>
+            </tr>
+            @endforeach
+        </tbody>
+    </table>
 
     <table>
         <thead>

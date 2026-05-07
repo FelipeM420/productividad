@@ -137,6 +137,10 @@
                    class="sidebar-link {{ Request::routeIs('admin.reportes.*') ? 'active' : '' }}">
                     <i class="bi bi-file-earmark-bar-graph"></i> Reportes
                 </a>
+                <a href="{{ $safeRoute('admin.estadisticas.index') }}"
+                   class="sidebar-link {{ Request::routeIs('admin.estadisticas.*') ? 'active' : '' }}">
+                    <i class="bi bi-bar-chart-line"></i> Estadisticas
+                </a>
 
             @elseif(Auth::user()->rol === 'vendedor')
                 <div class="sidebar-section">General</div>

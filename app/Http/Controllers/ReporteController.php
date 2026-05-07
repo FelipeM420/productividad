@@ -3,54 +3,78 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use App\Models\Meta;
-use App\Models\Actividad;
+use App\Services\ProductividadAnalytics;
 use Illuminate\Http\Request;
 
 class ReporteController extends Controller
 {
+    public function __construct(private ProductividadAnalytics $analytics)
+    {
+    }
+
     public function index(Request $request)
     {
-        $mes       = $request->input('mes', date('n'));
-        $año       = $request->input('año', date('Y'));
-        $vendedorId = $request->input('vendedor');
+        [$mes, $ano, $vendedorId] = $this->filtros($request);
 
-        $vendedores = User::where('rol','vendedor')->where('activo',true)->get();
+        $vendedores = User::where('rol', 'vendedor')->where('activo', true)->orderBy('name')->get();
+        $reporte = $this->analytics->construirResumen($mes, $ano, $vendedorId);
+        $totales = $this->analytics->totalesReporte($reporte);
+        $proyeccion = $this->analytics->proyeccionMensual($mes, $ano, $vendedorId);
+        $series = $this->analytics->seriesMensuales($ano, $vendedorId);
+        $meses = $this->meses();
 
-        $query = User::where('rol','vendedor')->where('activo',true)
-            ->with([
-                'metas'       => fn($q) => $q->where('mes',$mes)->where('año',$año),
-                'actividades' => fn($q) => $q->whereMonth('fecha',$mes)->whereYear('fecha',$año),
-            ]);
+        return view('admin.reportes.index', compact(
+            'reporte',
+            'totales',
+            'proyeccion',
+            'series',
+            'vendedores',
+            'mes',
+            'ano',
+            'vendedorId',
+            'meses'
+        ));
+    }
 
-        if ($vendedorId) $query->where('id', $vendedorId);
+    public function estadisticas(Request $request)
+    {
+        [$mes, $ano, $vendedorId] = $this->filtros($request);
 
-        $reporte = $query->get()->map(function ($v) {
-            $meta  = $v->metas->first();
-            $acts  = $v->actividades;
-            return [
-                'nombre'          => $v->name,
-                'ventas_real'     => $acts->sum('ventas'),
-                'ventas_meta'     => $meta?->ventas_meta ?? 0,
-                'ca_real'         => $acts->sum('clientes_atendidos'),
-                'ca_meta'         => $meta?->clientes_atendidos_meta ?? 0,
-                'cv_real'         => $acts->sum('clientes_visitados'),
-                'cv_meta'         => $meta?->clientes_visitados_meta ?? 0,
-                'nc_real'         => $acts->sum('nuevos_clientes'),
-                'nc_meta'         => $meta?->nuevos_clientes_meta ?? 0,
-            ];
-        });
+        $vendedores = User::where('rol', 'vendedor')->where('activo', true)->orderBy('name')->get();
+        $series = $this->analytics->seriesMensuales($ano, $vendedorId);
+        $comparacion = $this->analytics->construirResumen($mes, $ano, $vendedorId);
+        $proyeccion = $this->analytics->proyeccionMensual($mes, $ano, $vendedorId);
+        $meses = $this->meses();
 
-        $meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-
-        return view('admin.reportes.index',
-            compact('reporte','vendedores','mes','año','vendedorId','meses'));
+        return view('admin.reportes.estadisticas', compact(
+            'series',
+            'comparacion',
+            'proyeccion',
+            'ano',
+            'mes',
+            'vendedorId',
+            'vendedores',
+            'meses'
+        ));
     }
 
     public function pdf(Request $request)
     {
-        // Se implementa en el Paso 6
-        return back()->with('error', 'PDF disponible en el Paso 6.');
+        return back()->with('error', 'La exportacion PDF avanzada esta disponible para el rol auditor.');
+    }
+
+    private function filtros(Request $request): array
+    {
+        $mes = (int) $request->input('mes', now()->month);
+        $ano = (int) $request->input('ano', $request->input('año', $request->input('aÃ±o', now()->year)));
+        $vendedorId = $request->filled('vendedor') ? (int) $request->input('vendedor') : null;
+
+        return [$mes, $ano, $vendedorId];
+    }
+
+    private function meses(): array
+    {
+        return ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+            'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     }
 }
